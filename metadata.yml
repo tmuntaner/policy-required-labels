@@ -1,0 +1,12 @@
+rules:
+- apiGroups: [""]
+  apiVersions: ["v1"]
+  resources: ["pods"]
+  operations: ["CREATE"]
+mutating: false
+annotations:
+  io.kubewarden.policy.title: policy-required-labels
+  io.kubewarden.policy.description: Short description
+  io.kubewarden.policy.author: tmuntaner@suse.com
+  io.kubewarden.policy.url: https://github.com/tmuntaner/policy-required-labels
+  io.kubewarden.policy.source: https://github.com/tmuntaner/policy-required-labels
