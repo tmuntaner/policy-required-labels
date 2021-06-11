@@ -18,33 +18,57 @@ pub extern "C" fn wapc_init() {
 
 fn validate(payload: &[u8]) -> CallResult {
     let validation_request: ValidationRequest<Settings> = ValidationRequest::new(payload)?;
-    let required_labels = [String::from("owner"), String::from("cost-center")];
 
     match serde_json::from_value::<apicore::Pod>(validation_request.request.object) {
         Ok(pod) => {
-            let mut missing_labels = Vec::new();
+            let mut missing_labels: Vec<String> = Vec::new();
+
+            let required_labels = validation_request
+                .settings
+                .required_labels
+                .unwrap_or_default();
 
             match pod.metadata.labels {
                 None => {
-                    missing_labels = required_labels.to_vec();
+                    for required_label in &required_labels {
+                        let label = required_label.name.as_ref().unwrap().to_string();
+                        missing_labels.push(label);
+                    }
                 }
                 Some(pod_labels) => {
                     for required_label in &required_labels {
-                        if pod_labels.get(required_label) == None {
-                            missing_labels.push(required_label.clone());
+                        let label_name = required_label.name.as_ref().unwrap().to_string();
+
+                        match pod_labels.get(label_name.as_str()) {
+                            Some(value) => {
+                                let allowed_values =
+                                    required_label.allowed_values.as_ref().unwrap();
+
+                                if !allowed_values.contains(&value.to_string()) {
+                                    let message = format!(
+                                        "invalid value for label '{}: {}'",
+                                        label_name, value
+                                    );
+
+                                    return kubewarden::reject_request(Some(message), None);
+                                }
+                            }
+                            None => {
+                                missing_labels.push(label_name);
+                            }
                         }
                     }
                 }
             }
 
             if !missing_labels.is_empty() {
-                let label = if missing_labels.len() == 1 {
-                    format!("pod label {:?} is required", missing_labels)
+                let message = if missing_labels.len() == 1 {
+                    format!("pod label '{}' is required", missing_labels.join(", "))
                 } else {
-                    format!("pod labels {:?} are required", missing_labels)
+                    format!("pod labels '{}' are required", missing_labels.join(", "))
                 };
 
-                return kubewarden::reject_request(Some(label), None);
+                return kubewarden::reject_request(Some(message), None);
             }
 
             kubewarden::accept_request()
@@ -57,7 +81,25 @@ fn validate(payload: &[u8]) -> CallResult {
 mod tests {
     use super::*;
 
+    use crate::settings::RequiredLabel;
     use kubewarden_policy_sdk::test::Testcase;
+
+    fn generate_settings() -> Settings {
+        let mut labels: Vec<RequiredLabel> = Vec::new();
+        labels.push(RequiredLabel {
+            name: Some("owner".to_string()),
+            allowed_values: Some(["razor-crest".to_string()].to_vec()),
+        });
+
+        labels.push(RequiredLabel {
+            name: Some("cost-center".to_string()),
+            allowed_values: Some(["cc-42".to_string()].to_vec()),
+        });
+
+        Settings {
+            required_labels: Some(labels),
+        }
+    }
 
     #[test]
     fn accept_pod_with_valid_name() -> Result<(), ()> {
@@ -66,7 +108,7 @@ mod tests {
             name: String::from("Valid name"),
             fixture_file: String::from(request_file),
             expected_validation_result: true,
-            settings: Settings {},
+            settings: generate_settings(),
         };
 
         let res = tc.eval(validate).unwrap();
@@ -86,7 +128,7 @@ mod tests {
             name: String::from("missing label owner"),
             fixture_file: String::from(request_file),
             expected_validation_result: false,
-            settings: Settings {},
+            settings: generate_settings(),
         };
 
         let res = tc.eval(validate).unwrap();
@@ -94,6 +136,11 @@ mod tests {
             res.mutated_object.is_none(),
             "Something mutated with test case: {}",
             tc.name,
+        );
+
+        assert_eq!(
+            res.message.unwrap(),
+            String::from("pod label 'owner' is required")
         );
 
         Ok(())
@@ -106,7 +153,7 @@ mod tests {
             name: String::from("missing label cost center"),
             fixture_file: String::from(request_file),
             expected_validation_result: false,
-            settings: Settings {},
+            settings: generate_settings(),
         };
 
         let res = tc.eval(validate).unwrap();
@@ -114,6 +161,11 @@ mod tests {
             res.mutated_object.is_none(),
             "Something mutated with test case: {}",
             tc.name,
+        );
+
+        assert_eq!(
+            res.message.unwrap(),
+            String::from("pod label 'cost-center' is required")
         );
 
         Ok(())
@@ -126,7 +178,7 @@ mod tests {
             name: String::from("missing labels"),
             fixture_file: String::from(request_file),
             expected_validation_result: false,
-            settings: Settings {},
+            settings: generate_settings(),
         };
 
         let res = tc.eval(validate).unwrap();
@@ -134,6 +186,36 @@ mod tests {
             res.mutated_object.is_none(),
             "Something mutated with test case: {}",
             tc.name,
+        );
+
+        assert_eq!(
+            res.message.unwrap(),
+            String::from("pod labels 'owner, cost-center' are required")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn reject_pod_with_invalid_label_owner() -> Result<(), ()> {
+        let request_file = "test_data/pod_creation_invalid_label_owner.json";
+        let tc = Testcase {
+            name: String::from("invalid label owner"),
+            fixture_file: String::from(request_file),
+            expected_validation_result: false,
+            settings: generate_settings(),
+        };
+
+        let res = tc.eval(validate).unwrap();
+        assert!(
+            res.mutated_object.is_none(),
+            "Something mutated with test case: {}",
+            tc.name,
+        );
+
+        assert_eq!(
+            res.message.unwrap(),
+            String::from("invalid value for label 'owner: foobar'")
         );
 
         Ok(())
@@ -146,7 +228,7 @@ mod tests {
             name: String::from("Ingress creation"),
             fixture_file: String::from(request_file),
             expected_validation_result: true,
-            settings: Settings {},
+            settings: generate_settings(),
         };
 
         let res = tc.eval(validate).unwrap();

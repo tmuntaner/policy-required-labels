@@ -7,7 +7,8 @@
     "metadata": {
       "name": "nginx",
       "labels": {
-        "owner": "razor-crest"
+        "owner": "foobar",
+        "cost-center": "cc-42"
       }
     },
     "spec": {

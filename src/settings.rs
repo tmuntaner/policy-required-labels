@@ -4,7 +4,15 @@ use serde::{Deserialize, Serialize};
 // loaded by the policy server.
 #[derive(Serialize, Deserialize, Default, Debug)]
 #[serde(default)]
-pub(crate) struct Settings {}
+pub(crate) struct Settings {
+    pub required_labels: Option<Vec<RequiredLabel>>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+pub(crate) struct RequiredLabel {
+    pub name: Option<String>,
+    pub allowed_values: Option<Vec<String>>,
+}
 
 impl kubewarden::settings::Validatable for Settings {
     fn validate(&self) -> Result<(), String> {
@@ -21,7 +29,7 @@ mod tests {
 
     #[test]
     fn validate_settings() -> Result<(), ()> {
-        let settings = Settings {};
+        let settings = Settings::default();
 
         assert!(settings.validate().is_ok());
         Ok(())
