@@ -1,0 +1,12 @@
+{
+  "required_labels": [
+    {
+      "name": "owner",
+      "allowed_values": ["razor-crest"]
+    },
+    {
+      "name": "cost-center",
+      "allowed_values": ["cc-42"]
+    }
+  ]
+}

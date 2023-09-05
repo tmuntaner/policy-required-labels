@@ -1,13 +1,24 @@
-extern crate wapc_guest as guest;
+use lazy_static::lazy_static;
+
 use guest::prelude::*;
+use kubewarden_policy_sdk::wapc_guest as guest;
 
 use k8s_openapi::api::core::v1 as apicore;
 
 extern crate kubewarden_policy_sdk as kubewarden;
-use kubewarden::{protocol_version_guest, request::ValidationRequest, validate_settings};
+use kubewarden::{logging, protocol_version_guest, request::ValidationRequest, validate_settings};
 
 mod settings;
 use settings::Settings;
+
+use slog::{info, o, warn, Logger};
+
+lazy_static! {
+    static ref LOG_DRAIN: Logger = Logger::root(
+        logging::KubewardenDrain::new(),
+        o!("policy" => "sample-policy")
+    );
+}
 
 #[no_mangle]
 pub extern "C" fn wapc_init() {
@@ -19,6 +30,13 @@ pub extern "C" fn wapc_init() {
 fn validate(payload: &[u8]) -> CallResult {
     let validation_request: ValidationRequest<Settings> = ValidationRequest::new(payload)?;
 
+    info!(LOG_DRAIN, "starting validation");
+
+    if validation_request.request.kind.kind != "Pod" {
+        return kubewarden::accept_request();
+    }
+
+    // TODO: you can unmarshal any Kubernetes API type you are interested in
     match serde_json::from_value::<apicore::Pod>(validation_request.request.object) {
         Ok(pod) => {
             let mut missing_labels: Vec<String> = Vec::new();
@@ -50,7 +68,12 @@ fn validate(payload: &[u8]) -> CallResult {
                                         label_name, value
                                     );
 
-                                    return kubewarden::reject_request(Some(message), None);
+                                    return kubewarden::reject_request(
+                                        Some(message),
+                                        None,
+                                        None,
+                                        None,
+                                    );
                                 }
                             }
                             None => {
@@ -68,12 +91,19 @@ fn validate(payload: &[u8]) -> CallResult {
                     format!("pod labels '{}' are required", missing_labels.join(", "))
                 };
 
-                return kubewarden::reject_request(Some(message), None);
+                return kubewarden::reject_request(Some(message), None, None, None);
             }
 
+            info!(LOG_DRAIN, "accepting resource");
+            return kubewarden::accept_request();
+        }
+        Err(_) => {
+            // TODO: handle as you wish
+            // We were forwarded a request we cannot unmarshal or
+            // understand, just accept it
+            warn!(LOG_DRAIN, "cannot unmarshal resource: this policy does not know how to evaluate this resource; accept it");
             kubewarden::accept_request()
         }
-        Err(_) => kubewarden::accept_request(),
     }
 }
 

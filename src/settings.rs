@@ -1,4 +1,7 @@
+use crate::LOG_DRAIN;
+
 use serde::{Deserialize, Serialize};
+use slog::info;
 
 // Describe the settings your policy expects when
 // loaded by the policy server.
@@ -16,7 +19,8 @@ pub(crate) struct RequiredLabel {
 
 impl kubewarden::settings::Validatable for Settings {
     fn validate(&self) -> Result<(), String> {
-        // TODO: perform settings validation if applies
+        info!(LOG_DRAIN, "starting settings validation");
+
         Ok(())
     }
 }
